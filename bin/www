@@ -34,7 +34,7 @@ MongoDB.connectDB(async (err) => {
         server.on('listening', onListening);
 
         // schedule tasks to be run on the server
-        cron.schedule("30 16 * * *", function() {
+        cron.schedule("0 5 * * *", function() {
             scrapEps()
         });
     } catch (e) {
