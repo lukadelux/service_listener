@@ -1,38 +1,44 @@
-const express = require('express')
 const request = require('request')
 const cheerio = require('cheerio')
 const moment = require('moment')
 const MongoDB = require('../db/mongodb')
-
 const convertCyrillic = require('cyrillic-to-latin')
-const router = express.Router()
-/* GET home page. */
-router.get('/', function(req, res, next) {
-  request.get('http://www.epsdistribucija.rs/Dan_0_Iskljucenja.htm', (error, response, body) => {
-      const $ = cheerio.load(body)
-      const info = []
-      const rows = $('tr[bgcolor="#DDDDDD"]')
-      for (let i = 1; i < rows.length; i++ ) {
-          const municipality = convertCyrillic(rows[i].children[0].children[0].data)
-          const time = convertCyrillic(rows[i].children[1].children[0].data)
-          const streets = convertCyrillic(rows[i].children[2].children[0].data)
-          info.push(...normalizeScrappedStreets(municipality, time, streets))
-      }
-      const db = MongoDB.getDB()
-      db.collection('eps').insertMany(info).then((result) => {
-          res.send(`<pre>${JSON.stringify(info)}</pre>`)
-      })
-      .catch((e) => { throw e })
+const { logger } = require('../app')
 
-  })
-})
+const scrapEps = () => {
+    request.get('http://www.epsdistribucija.rs/Dan_0_Iskljucenja.htm', (error, response, body) => {
+        const $ = cheerio.load(body)
+        const info = []
+        const rows = $('tr[bgcolor="#DDDDDD"]')
+        for (let i = 1; i < rows.length; i++) {
+            const municipality = convertCyrillic(rows[i].children[0].children[0].data)
+            const time = convertCyrillic(rows[i].children[1].children[0].data)
+            const streets = convertCyrillic(rows[i].children[2].children[0].data)
+            info.push(...normalizeScrappedStreets(municipality, time, streets))
+        }
+        const db = MongoDB.getDB()
+        db.collection('eps').insertMany(info).then((data) => {
+            logger.log({
+                level: 'info',
+                message: `${moment().format()} - Eps succesfully scrapped for ${data.result.n} entries`
+            });
+        })
+            .catch((e) => {
+                logger.log({
+                    level: 'error',
+                    message: `${moment().format()} - Error thrown: ${e}`
+                });
+            })
+
+    })
+}
 
 const normalizeScrappedStreets = (municipality, timeRange, streetsString) => {
-   const streets = streetsString.split(", ")
+    const streets = streetsString.split(", ")
     let normalizedStreets = []
-    streets.forEach ((street) => {
+    streets.forEach((street) => {
         let streetsArray = street.split(": ")
-        if(streetsArray[0].indexOf('Naselje') > -1) {
+        if (streetsArray[0].indexOf('Naselje') > -1) {
             streetsArray.shift()
         }
         if (streetsArray.length === 2) {
@@ -40,7 +46,7 @@ const normalizeScrappedStreets = (municipality, timeRange, streetsString) => {
             normalizedStreets = [...normalizedStreets, ...result]
         }
     })
-    const [ startTime, endTime ] = timeRange.split(" - ")
+    const [startTime, endTime] = timeRange.split(" - ")
     return normalizedStreets.map((street) => {
         return {
             ...street,
@@ -67,7 +73,7 @@ const traverseStreetNumbers = ([street, numbers]) => {
 
         if (streetNo.indexOf('-') > -1) {
             const streetRange = streetNo.split('-')
-            const [ min, max ] = streetRange
+            const [min, max] = streetRange
             for (let i = min; i <= max; i++) {
                 result.push({
                     streetName: street.trim(),
@@ -84,4 +90,4 @@ const traverseStreetNumbers = ([street, numbers]) => {
     return result
 }
 
-module.exports = router
+module.exports = { scrapEps }
