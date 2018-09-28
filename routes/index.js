@@ -1,6 +1,9 @@
 const express = require('express')
 const request = require('request')
 const cheerio = require('cheerio')
+const moment = require('moment')
+const MongoDB = require('../db/mongodb')
+
 const convertCyrillic = require('cyrillic-to-latin')
 const router = express.Router()
 /* GET home page. */
@@ -10,28 +13,46 @@ router.get('/', function(req, res, next) {
       const info = []
       const rows = $('tr[bgcolor="#DDDDDD"]')
       for (let i = 1; i < rows.length; i++ ) {
-          info.push({
-              municipality: rows[i].children[0].children[0].data ? convertCyrillic(rows[i].children[0].children[0].data) : '',
-              vreme: rows[i].children[1].children[0].data,
-              streets: normalizeScrappedStreets(convertCyrillic(rows[i].children[2].children[0].data))
-          })
+          const municipality = convertCyrillic(rows[i].children[0].children[0].data)
+          const time = convertCyrillic(rows[i].children[1].children[0].data)
+          const streets = convertCyrillic(rows[i].children[2].children[0].data)
+          info.push(...normalizeScrappedStreets(municipality, time, streets))
       }
-      res.send(body)
+      const db = MongoDB.getDB()
+      db.collection('eps').insertMany(info).then((result) => {
+          res.send(`<pre>${JSON.stringify(info)}</pre>`)
+      })
+      .catch((e) => { throw e })
+
   })
 })
 
-const normalizeScrappedStreets = (streetsString) => {
-    const streets = streetsString.split(", ")
+const normalizeScrappedStreets = (municipality, timeRange, streetsString) => {
+   const streets = streetsString.split(", ")
     let normalizedStreets = []
     streets.forEach ((street) => {
         let streetsArray = street.split(": ")
         if(streetsArray[0].indexOf('Naselje') > -1) {
             streetsArray.shift()
         }
-        let result = traverseStreetNumbers(streetsArray)
-        normalizedStreets = [...normalizedStreets, ...result]
+        if (streetsArray.length === 2) {
+            let result = traverseStreetNumbers(streetsArray)
+            normalizedStreets = [...normalizedStreets, ...result]
+        }
     })
-    return normalizedStreets
+    const [ startTime, endTime ] = timeRange.split(" - ")
+    return normalizedStreets.map((street) => {
+        return {
+            ...street,
+            municipality: municipality,
+            city: 'Belgrade',
+            state: 'RS',
+            startTime: startTime,
+            endTime: endTime,
+            date: moment().format('MM-DD-YYYY')
+        }
+    })
+
 }
 
 const traverseStreetNumbers = ([street, numbers]) => {
@@ -49,14 +70,14 @@ const traverseStreetNumbers = ([street, numbers]) => {
             const [ min, max ] = streetRange
             for (let i = min; i <= max; i++) {
                 result.push({
-                    street: street.trim(),
-                    number: i
+                    streetName: street.trim(),
+                    streetNumber: i
                 })
             }
         } else {
             result.push({
-                street: street.trim(),
-                number: streetNo.trim()
+                streetName: street.trim(),
+                streetNumber: streetNo.trim()
             })
         }
     })
